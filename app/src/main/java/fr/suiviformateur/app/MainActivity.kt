@@ -41,7 +41,9 @@ class ReminderReceiver:android.content.BroadcastReceiver(){
  override fun onReceive(ctx:Context,intent:Intent){
   val prefs=ctx.getSharedPreferences("options",0)
   if(intent.action=="fr.suiviformateur.REMINDER"){
-   if(prefs.getBoolean("vacances",false)||!prefs.getBoolean("rappel",true))return
+   if(prefs.getBoolean("vacances",false)||!prefs.getBoolean("rappel",false))return
+   val weekday=Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
+   if(weekday==Calendar.SATURDAY||weekday==Calendar.SUNDAY){MainActivity.scheduleReminder(ctx);return}
    val manager=ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
    if(Build.VERSION.SDK_INT>=26)manager.createNotificationChannel(NotificationChannel("rappels","Rappels de saisie",NotificationManager.IMPORTANCE_DEFAULT))
    val open=Intent(ctx,MainActivity::class.java).apply{putExtra("today",true);flags=Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP}
@@ -58,8 +60,8 @@ class MainActivity:Activity(){
    val p=ctx.getSharedPreferences("options",0);val alarm=ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
    val i=Intent(ctx,ReminderReceiver::class.java).apply{action="fr.suiviformateur.REMINDER"}
    val pi=PendingIntent.getBroadcast(ctx,2,i,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-   alarm.cancel(pi);if(!p.getBoolean("rappel",true)||p.getBoolean("vacances",false))return
-   val t=p.getString("heure","18:00")?:"18:00";val v=t.split(":");val c=Calendar.getInstance().apply{set(Calendar.HOUR_OF_DAY,v.getOrNull(0)?.toIntOrNull()?.coerceIn(0,23)?:18);set(Calendar.MINUTE,v.getOrNull(1)?.toIntOrNull()?.coerceIn(0,59)?:0);set(Calendar.SECOND,0);if(timeInMillis<=System.currentTimeMillis())add(Calendar.DATE,1)}
+   alarm.cancel(pi);if(!p.getBoolean("rappel",false)||p.getBoolean("vacances",false))return
+   val t=p.getString("heure","18:00")?:"18:00";val v=t.split(":");val c=Calendar.getInstance().apply{set(Calendar.HOUR_OF_DAY,v.getOrNull(0)?.toIntOrNull()?.coerceIn(0,23)?:18);set(Calendar.MINUTE,v.getOrNull(1)?.toIntOrNull()?.coerceIn(0,59)?:0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0);if(timeInMillis<=System.currentTimeMillis())add(Calendar.DATE,1);while(get(Calendar.DAY_OF_WEEK)==Calendar.SATURDAY||get(Calendar.DAY_OF_WEEK)==Calendar.SUNDAY)add(Calendar.DATE,1)}
    alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,c.timeInMillis,pi)
   }
  }
@@ -235,9 +237,21 @@ class MainActivity:Activity(){
   text(p,"Les modifications sont enregistrées immédiatement en local. Choisis un dossier pour obtenir aussi une copie JSON de chaque fiche.")
   text(p,"Dossier : "+(folder?.toString()?:"Non configuré"),12f)
   button(p,"Choisir le dossier de sauvegarde"){val i=Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply{addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)};startActivityForResult(i,124)}
-  heading(p,"Rappels")
-  check(p,"Rappel quotidien",prefs.getBoolean("rappel",true)){prefs.edit().putBoolean("rappel",it).apply();scheduleReminder(this)}
-  input(p,"Heure du rappel (HH:mm)",prefs.getString("heure","18:00")?:"18:00"){prefs.edit().putString("heure",it).apply();if(timeMinutes(it)!=null)scheduleReminder(this)}
+  heading(p,"Réveil de rappel — du lundi au vendredi")
+  text(p,"Choisis l'heure comme sur un réveil. Aucun rappel le samedi ni le dimanche.",13f)
+  val current=prefs.getString("heure","18:00")?:"18:00"
+  val clock=TextView(this).apply{text=current;textSize=32f;gravity=Gravity.CENTER;setTextColor(blue);setPadding(dp(12),dp(14),dp(12),dp(14));setBackgroundColor(Color.WHITE)}
+  p.addView(clock,LinearLayout.LayoutParams(-1,-2))
+  var chosen=current
+  button(p,"Choisir l'heure du réveil"){val parts=chosen.split(":");val h=parts.getOrNull(0)?.toIntOrNull()?:18;val m=parts.getOrNull(1)?.toIntOrNull()?:0
+   TimePickerDialog(this,{_,hour,minute->chosen=String.format(Locale.FRANCE,"%02d:%02d",hour,minute);clock.text=chosen},h,m,true).show()
+  }
+  val enabled=CheckBox(this).apply{text="Activer le rappel du lundi au vendredi";isChecked=prefs.getBoolean("rappel",false)}
+  p.addView(enabled)
+  button(p,"Valider le rappel"){prefs.edit().putBoolean("rappel",enabled.isChecked).putString("heure",chosen).apply();scheduleReminder(this)
+   if(Build.VERSION.SDK_INT>=33&&checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"),55)
+   Toast.makeText(this,if(enabled.isChecked)"Rappel validé : "+chosen+" du lundi au vendredi" else "Rappel désactivé",Toast.LENGTH_LONG).show()
+  }
   check(p,"Mode vacances : suspendre les rappels",prefs.getBoolean("vacances",false)){prefs.edit().putBoolean("vacances",it).apply();scheduleReminder(this)}
   check(p,"Bilan de fin de mois",prefs.getBoolean("bilan",true)){prefs.edit().putBoolean("bilan",it).apply()}
   text(p,"Les notifications Android nécessitent l'autorisation système. Le bilan mensuel est consultable depuis l'onglet Bilan.",12f)
