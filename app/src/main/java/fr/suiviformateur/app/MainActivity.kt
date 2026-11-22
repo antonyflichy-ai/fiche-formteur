@@ -84,7 +84,7 @@ class MainActivity:Activity(){
   setContentView(root)
   val header=TextView(this).apply{text="Suivi Formateur  •  "+title;textSize=21f;setTextColor(Color.WHITE);setBackgroundColor(blue);setPadding(22,28,16,28)}
   root.addView(header)
-  val sc=ScrollView(this).apply{fillViewport=true};root.addView(sc,LinearLayout.LayoutParams(-1,0,1f))
+  val sc=ScrollView(this).apply{isFillViewport=true};root.addView(sc,LinearLayout.LayoutParams(-1,0,1f))
   val content=LinearLayout(this).apply{orientation=1;setPadding(18,12,18,28)};sc.addView(content)
   val nav=LinearLayout(this).apply{orientation=0;setBackgroundColor(Color.WHITE)}
   root.addView(nav)
