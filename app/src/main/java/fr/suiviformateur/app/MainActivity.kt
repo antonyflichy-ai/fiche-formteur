@@ -8,6 +8,8 @@ import android.graphics.*
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.text.*
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.view.*
 import android.widget.*
 import androidx.core.content.FileProvider
@@ -38,6 +40,35 @@ class SignPad(ctx:Context):View(ctx){
  fun encode():String?{if(previous==null&&strokes.isEmpty())return null;val b=Bitmap.createBitmap(width.coerceAtLeast(1),height.coerceAtLeast(1),Bitmap.Config.ARGB_8888);draw(Canvas(b));val o=ByteArrayOutputStream();b.compress(Bitmap.CompressFormat.PNG,100,o);return android.util.Base64.encodeToString(o.toByteArray(),android.util.Base64.NO_WRAP)}
 }
 class ReminderReceiver:android.content.BroadcastReceiver(){
+ private fun speakReminder(ctx:Context){
+  val pending=goAsync()
+  val handler=Handler(Looper.getMainLooper())
+  var tts:TextToSpeech?=null
+  var finished=false
+  val finish=Runnable{if(!finished){finished=true;tts?.stop();tts?.shutdown();pending.finish()}}
+  handler.postDelayed(finish,12000)
+  try{
+   tts=TextToSpeech(ctx.applicationContext){status->
+    if(status!=TextToSpeech.SUCCESS){handler.post(finish)}
+    else{
+     val voice=tts
+     if(voice==null){handler.post(finish)}
+     else{
+      voice.language=Locale.FRENCH
+      voice.setOnUtteranceProgressListener(object:UtteranceProgressListener(){
+       override fun onStart(utteranceId:String){}
+       override fun onDone(utteranceId:String){handler.post(finish)}
+       @Deprecated("Deprecated in Java")
+       override fun onError(utteranceId:String){handler.post(finish)}
+      })
+      val result=voice.speak("Entrez vos données dans Suivi Formateur.",TextToSpeech.QUEUE_FLUSH,null,"suivi-rappel")
+      if(result==TextToSpeech.ERROR)handler.post(finish)
+     }
+    }
+   }
+  }catch(_:Exception){handler.post(finish)}
+ }
+
  override fun onReceive(ctx:Context,intent:Intent){
   val prefs=ctx.getSharedPreferences("options",0)
   if(intent.action=="fr.suiviformateur.REMINDER"){
@@ -50,6 +81,7 @@ class ReminderReceiver:android.content.BroadcastReceiver(){
    val pending=PendingIntent.getActivity(ctx,1,open,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
    val n=Notification.Builder(ctx,"rappels").setSmallIcon(android.R.drawable.ic_menu_edit).setContentTitle("Suivi Formateur").setContentText("Pense à remplir ta fiche du jour.").setContentIntent(pending).setAutoCancel(true).build()
    manager.notify(101,n)
+   if(prefs.getBoolean("voix",true))speakReminder(ctx)
    MainActivity.scheduleReminder(ctx)
   }else if(intent.action==Intent.ACTION_BOOT_COMPLETED)MainActivity.scheduleReminder(ctx)
  }
@@ -252,6 +284,8 @@ class MainActivity:Activity(){
    if(Build.VERSION.SDK_INT>=33&&checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"),55)
    Toast.makeText(this,if(enabled.isChecked)"Rappel validé : "+chosen+" du lundi au vendredi" else "Rappel désactivé",Toast.LENGTH_LONG).show()
   }
+  check(p,"Annonce vocale : Entrez vos données",prefs.getBoolean("voix",true)){prefs.edit().putBoolean("voix",it).apply()}
+  text(p,"Le son de notification et la voix dépendent du volume et des autorisations Android. Le mode silencieux peut empêcher la lecture.",12f)
   check(p,"Mode vacances : suspendre les rappels",prefs.getBoolean("vacances",false)){prefs.edit().putBoolean("vacances",it).apply();scheduleReminder(this)}
   check(p,"Bilan de fin de mois",prefs.getBoolean("bilan",true)){prefs.edit().putBoolean("bilan",it).apply()}
   text(p,"Les notifications Android nécessitent l'autorisation système. Le bilan mensuel est consultable depuis l'onglet Bilan.",12f)
