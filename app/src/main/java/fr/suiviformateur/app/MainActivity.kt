@@ -73,7 +73,8 @@ class MainActivity:Activity(){
  private var muted=false
  private val blue=Color.rgb(28,70,142)
  private val days=listOf("Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche")
- override fun onCreate(b:Bundle?){super.onCreate(b);db=LocalDb(this);folder=prefs.getString("folder",null)?.let{Uri.parse(it)};if(intent.getBooleanExtra("today",false))screen="fiche";scheduleReminder(this);render()}
+ private fun dp(n:Int)=(n*resources.displayMetrics.density+0.5f).toInt()
+ override fun onCreate(b:Bundle?){super.onCreate(b);db=LocalDb(this);folder=prefs.getString("folder",null)?.let{Uri.parse(it)};if(intent.getBooleanExtra("today",false))screen="fiche";window.statusBarColor=Color.rgb(18,49,104);window.navigationBarColor=Color.rgb(18,49,104);window.decorView.systemUiVisibility=0;scheduleReminder(this);render()}
  private fun parse(s:String):Calendar=Calendar.getInstance().apply{time=SimpleDateFormat("yyyy-MM-dd",Locale.US).parse(s)?:Date()}
  private fun iso(c:Calendar)=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(c.time)
  private fun shift(d:String,n:Int)=iso(parse(d).apply{add(Calendar.DATE,n)})
@@ -82,15 +83,16 @@ class MainActivity:Activity(){
  private fun page(title:String):LinearLayout{
   val root=LinearLayout(this).apply{orientation=1;setBackgroundColor(Color.rgb(244,247,252))}
   setContentView(root)
-  val header=TextView(this).apply{text="Suivi Formateur  •  "+title;textSize=21f;setTextColor(Color.WHITE);setBackgroundColor(blue);setPadding(22,28,16,28)}
-  root.addView(header)
-  val sc=ScrollView(this).apply{isFillViewport=true};root.addView(sc,LinearLayout.LayoutParams(-1,0,1f))
-  val content=LinearLayout(this).apply{orientation=1;setPadding(18,12,18,28)};sc.addView(content)
-  val nav=LinearLayout(this).apply{orientation=0;setBackgroundColor(Color.WHITE)}
-  root.addView(nav)
+  val header=TextView(this).apply{text="Suivi Formateur  •  "+title;textSize=19f;setTextColor(Color.WHITE);setBackgroundColor(blue);setPadding(dp(16),dp(16),dp(12),dp(16));maxLines=2}
+  root.addView(header,LinearLayout.LayoutParams(-1,-2))
+  val sc=ScrollView(this).apply{isFillViewport=true;clipToPadding=false};root.addView(sc,LinearLayout.LayoutParams(-1,0,1f))
+  val content=LinearLayout(this).apply{orientation=1;setPadding(dp(12),dp(12),dp(12),dp(28))};sc.addView(content)
+  val nav=LinearLayout(this).apply{orientation=0;setBackgroundColor(Color.rgb(18,49,104));setPadding(dp(2),dp(5),dp(2),dp(8))}
+  root.addView(nav,LinearLayout.LayoutParams(-1,dp(70)))
   listOf("Calendrier" to "cal","Fiche" to "fiche","Semaine" to "semaine","Bilan" to "bilan","Options" to "options").forEach{(label,target)->
-   val b=Button(this).apply{text=label;textSize=10f;isAllCaps=false;setPadding(0,4,0,4);setOnClickListener{screen=target;render()}}
-   nav.addView(b,LinearLayout.LayoutParams(0,60,1f))
+   val active=screen==target
+   val item=TextView(this).apply{text=label;textSize=11f;gravity=Gravity.CENTER;setTextColor(if(active)Color.rgb(18,49,104) else Color.WHITE);setBackgroundColor(if(active)Color.WHITE else Color.rgb(18,49,104));setOnClickListener{screen=target;render()};contentDescription="Ouvrir "+label}
+   nav.addView(item,LinearLayout.LayoutParams(0,-1,1f))
   }
   return content
  }
@@ -120,16 +122,42 @@ class MainActivity:Activity(){
  private fun summary(p:LinearLayout,t:Totals){text(p,"Heures manuelles : "+hm(t.mins));text(p,"Découchers hôtel : "+t.hotel);text(p,"Découchers cabine : "+t.cabine);text(p,"Nombre de primes RH : "+t.rh)}
  private fun render(){when(screen){"fiche"->fiche();"semaine"->semaine();"bilan"->bilan();"options"->options();else->calendrier()}}
  private fun calendrier(){
-  val p=page("Calendrier");heading(p,month)
-  val c=parse(month+"-01");button(p,"◀ Mois précédent"){c.add(Calendar.MONTH,-1);month=iso(c).substring(0,7);render()}
-  button(p,"Mois suivant ▶"){c.add(Calendar.MONTH,1);month=iso(c).substring(0,7);render()}
-  val row=LinearLayout(this).apply{orientation=1};p.addView(row)
-  val first=parse(month+"-01");val daysInMonth=first.getActualMaximum(Calendar.DAY_OF_MONTH)
-  for(start in 1..daysInMonth step 7){val line=LinearLayout(this);row.addView(line);for(n in start..minOf(start+6,daysInMonth)){
-   val d=month+"-"+String.format(Locale.US,"%02d",n)
-   val b=Button(this).apply{text=n.toString()+(if(db.day(d).length()>0)" •" else "");textSize=12f;setOnClickListener{date=d;screen="fiche";render()}}
-   line.addView(b,LinearLayout.LayoutParams(0,55,1f))
-  }}
+  val p=page("Calendrier")
+  val c=parse(month+"-01")
+  heading(p,SimpleDateFormat("MMMM yyyy",Locale.FRENCH).format(c.time).replaceFirstChar{it.uppercase()})
+  val controls=LinearLayout(this).apply{orientation=0};p.addView(controls)
+  val prev=Button(this).apply{text="◀ Précédent";isAllCaps=false;textSize=12f;setOnClickListener{val d=parse(month+"-01");d.add(Calendar.MONTH,-1);month=iso(d).substring(0,7);render()}}
+  val next=Button(this).apply{text="Suivant ▶";isAllCaps=false;textSize=12f;setOnClickListener{val d=parse(month+"-01");d.add(Calendar.MONTH,1);month=iso(d).substring(0,7);render()}}
+  controls.addView(prev,LinearLayout.LayoutParams(0,dp(50),1f));controls.addView(next,LinearLayout.LayoutParams(0,dp(50),1f))
+  val labels=listOf("L","M","M","J","V","S","D")
+  val week=LinearLayout(this);p.addView(week)
+  labels.forEach{label->week.addView(TextView(this).apply{text=label;textSize=13f;gravity=Gravity.CENTER;setTextColor(blue);setTypeface(null,Typeface.BOLD)},LinearLayout.LayoutParams(0,dp(34),1f))}
+  val first=parse(month+"-01")
+  val daysInMonth=first.getActualMaximum(Calendar.DAY_OF_MONTH)
+  val offset=(first.get(Calendar.DAY_OF_WEEK)+5)%7
+  val today=iso(Calendar.getInstance())
+  val cells=offset+daysInMonth
+  for(rowIndex in 0 until (cells+6)/7){
+   val row=LinearLayout(this);p.addView(row)
+   for(column in 0..6){
+    val n=rowIndex*7+column-offset+1
+    if(n<1||n>daysInMonth){row.addView(TextView(this),LinearLayout.LayoutParams(0,dp(54),1f));continue}
+    val d=month+"-"+String.format(Locale.US,"%02d",n)
+    val hasData=db.day(d).length()>0
+    val selected=d==date
+    val tile=TextView(this).apply{
+     text=n.toString()+(if(hasData)" •" else "")
+     textSize=15f;gravity=Gravity.CENTER
+     setTextColor(if(selected||d==today)Color.WHITE else Color.rgb(37,59,91))
+     setBackgroundColor(if(selected)blue else if(d==today)Color.rgb(55,128,202) else Color.WHITE)
+     setOnClickListener{date=d;screen="fiche";render()}
+     contentDescription="Ouvrir la fiche du "+d
+    }
+    val wrap=LinearLayout(this).apply{setPadding(dp(2),dp(2),dp(2),dp(2));addView(tile,LinearLayout.LayoutParams(-1,-1))}
+    row.addView(wrap,LinearLayout.LayoutParams(0,dp(54),1f))
+   }
+  }
+  text(p,"• = fiche déjà renseignée",12f)
   button(p,"Ouvrir aujourd'hui"){date=iso(Calendar.getInstance());month=date.substring(0,7);screen="fiche";render()}
   button(p,"Voir la semaine complète"){screen="semaine";render()}
  }
