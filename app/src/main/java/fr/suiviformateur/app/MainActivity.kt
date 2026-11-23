@@ -71,18 +71,19 @@ class ReminderReceiver:android.content.BroadcastReceiver(){
 
  override fun onReceive(ctx:Context,intent:Intent){
   val prefs=ctx.getSharedPreferences("options",0)
-  if(intent.action=="fr.suiviformateur.REMINDER"){
-   if(prefs.getBoolean("vacances",false)||!prefs.getBoolean("rappel",false))return
+  if(intent.action=="fr.suiviformateur.REMINDER"||intent.action=="fr.suiviformateur.TEST_REMINDER"){
+   val testing=intent.action=="fr.suiviformateur.TEST_REMINDER"
+   if(!testing&&(prefs.getBoolean("vacances",false)||!prefs.getBoolean("rappel",false)))return
    val weekday=Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
-   if(weekday==Calendar.SATURDAY||weekday==Calendar.SUNDAY){MainActivity.scheduleReminder(ctx);return}
+   if(!testing&&(weekday==Calendar.SATURDAY||weekday==Calendar.SUNDAY)){MainActivity.scheduleReminder(ctx);return}
    val manager=ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
    if(Build.VERSION.SDK_INT>=26)manager.createNotificationChannel(NotificationChannel("rappels","Rappels de saisie",NotificationManager.IMPORTANCE_DEFAULT))
    val open=Intent(ctx,MainActivity::class.java).apply{putExtra("today",true);flags=Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP}
    val pending=PendingIntent.getActivity(ctx,1,open,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
    val n=Notification.Builder(ctx,"rappels").setSmallIcon(android.R.drawable.ic_menu_edit).setContentTitle("Suivi Formateur").setContentText("Pense à remplir ta fiche du jour.").setContentIntent(pending).setAutoCancel(true).build()
-   manager.notify(101,n)
+   if(Build.VERSION.SDK_INT<33||ctx.checkSelfPermission("android.permission.POST_NOTIFICATIONS")==android.content.pm.PackageManager.PERMISSION_GRANTED)manager.notify(101,n)
    if(prefs.getBoolean("voix",true))speakReminder(ctx)
-   MainActivity.scheduleReminder(ctx)
+   if(!testing)MainActivity.scheduleReminder(ctx)
   }else if(intent.action==Intent.ACTION_BOOT_COMPLETED)MainActivity.scheduleReminder(ctx)
  }
 }
@@ -94,7 +95,9 @@ class MainActivity:Activity(){
    val pi=PendingIntent.getBroadcast(ctx,2,i,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
    alarm.cancel(pi);if(!p.getBoolean("rappel",false)||p.getBoolean("vacances",false))return
    val t=p.getString("heure","18:00")?:"18:00";val v=t.split(":");val c=Calendar.getInstance().apply{set(Calendar.HOUR_OF_DAY,v.getOrNull(0)?.toIntOrNull()?.coerceIn(0,23)?:18);set(Calendar.MINUTE,v.getOrNull(1)?.toIntOrNull()?.coerceIn(0,59)?:0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0);if(timeInMillis<=System.currentTimeMillis())add(Calendar.DATE,1);while(get(Calendar.DAY_OF_WEEK)==Calendar.SATURDAY||get(Calendar.DAY_OF_WEEK)==Calendar.SUNDAY)add(Calendar.DATE,1)}
-   alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,c.timeInMillis,pi)
+   if(Build.VERSION.SDK_INT>=31&&alarm.canScheduleExactAlarms())alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,c.timeInMillis,pi)
+   else if(Build.VERSION.SDK_INT<31)alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,c.timeInMillis,pi)
+   else alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,c.timeInMillis,pi)
   }
  }
  private lateinit var db:LocalDb
@@ -108,6 +111,7 @@ class MainActivity:Activity(){
  private val blue=Color.rgb(28,70,142)
  private val days=listOf("Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche")
  private fun dp(n:Int)=(n*resources.displayMetrics.density+0.5f).toInt()
+ override fun onResume(){super.onResume();scheduleReminder(this)}
  override fun onCreate(b:Bundle?){super.onCreate(b);db=LocalDb(this);folder=prefs.getString("folder",null)?.let{Uri.parse(it)};if(intent.getBooleanExtra("today",false))screen="fiche";window.statusBarColor=Color.rgb(18,49,104);window.navigationBarColor=Color.rgb(18,49,104);window.decorView.systemUiVisibility=0;scheduleReminder(this);render()}
  private fun parse(s:String):Calendar=Calendar.getInstance().apply{time=SimpleDateFormat("yyyy-MM-dd",Locale.US).parse(s)?:Date()}
  private fun iso(c:Calendar)=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(c.time)
@@ -284,6 +288,13 @@ class MainActivity:Activity(){
    if(Build.VERSION.SDK_INT>=33&&checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"),55)
    Toast.makeText(this,if(enabled.isChecked)"Rappel validé : "+chosen+" du lundi au vendredi" else "Rappel désactivé",Toast.LENGTH_LONG).show()
   }
+  if(Build.VERSION.SDK_INT>=31){
+   val alarms=getSystemService(Context.ALARM_SERVICE) as AlarmManager
+   if(!alarms.canScheduleExactAlarms())button(p,"Autoriser les alarmes exactes (important)"){
+    try{startActivity(Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,Uri.parse("package:"+packageName)))}catch(_:Exception){startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+packageName)))}
+   }
+  }
+  button(p,"Tester maintenant le rappel et la voix"){val i=Intent(this,ReminderReceiver::class.java).apply{action="fr.suiviformateur.TEST_REMINDER"};sendBroadcast(i);Toast.makeText(this,"Test envoyé : vérifie la notification et le volume",Toast.LENGTH_LONG).show()}
   check(p,"Annonce vocale : Entrez vos données",prefs.getBoolean("voix",true)){prefs.edit().putBoolean("voix",it).apply()}
   text(p,"Le son de notification et la voix dépendent du volume et des autorisations Android. Le mode silencieux peut empêcher la lecture.",12f)
   check(p,"Mode vacances : suspendre les rappels",prefs.getBoolean("vacances",false)){prefs.edit().putBoolean("vacances",it).apply();scheduleReminder(this)}
